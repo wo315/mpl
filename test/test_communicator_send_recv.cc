@@ -11,8 +11,31 @@
 #include <tuple>
 #include <utility>
 #include <algorithm>
+#include <type_traits>
 #include <mpl/mpl.hpp>
 #include "test_helper.hpp"
+
+#if __cplusplus >= 202002L
+#include <span>
+
+template<typename T>
+struct is_span : public std::false_type {};
+
+template<typename T, std::size_t N>
+struct is_span<std::span<T, N>> : public std::true_type {};
+
+template<typename T>
+inline constexpr bool is_span_v = is_span<T>::value;
+
+template<typename T>
+struct span_size;
+
+template<typename T, std::size_t N>
+struct span_size<std::span<T, N>> {
+  static constexpr std::size_t value = N;
+};
+
+#endif
 
 
 template<typename T>
@@ -23,9 +46,18 @@ bool send_recv_test(const T &data) {
   if (comm_world.rank() == 0)
     comm_world.send(data, 1);
   if (comm_world.rank() == 1) {
-    T data_r;
-    comm_world.recv(data_r, 0);
-    return data_r == data;
+    if constexpr (is_span_v<T>) {
+      using element_type = typename T::element_type;
+      constexpr auto size = span_size<T>::value;
+      std::array<element_type, size> array;
+      std::span data_r(array);
+      comm_world.recv(data_r, 0);
+      return std::equal(data.begin(), data.end(), data_r.begin(), data_r.end());
+    } else {
+      T data_r;
+      comm_world.recv(data_r, 0);
+      return data_r == data;
+    }
   }
   return true;
 }
@@ -69,9 +101,18 @@ bool bsend_recv_test(const T &data) {
     comm_world.bsend(data, 1);
   }
   if (comm_world.rank() == 1) {
-    T data_r;
-    comm_world.recv(data_r, 0);
-    return data_r == data;
+    if constexpr (is_span_v<T>) {
+      using element_type = typename T::element_type;
+      constexpr auto size = span_size<T>::value;
+      std::array<element_type, size> array;
+      std::span data_r(array);
+      comm_world.recv(data_r, 0);
+      return std::equal(data.begin(), data.end(), data_r.begin(), data_r.end());
+    } else {
+      T data_r;
+      comm_world.recv(data_r, 0);
+      return data_r == data;
+    }
   }
   return true;
 }
@@ -116,9 +157,18 @@ bool ssend_recv_test(const T &data) {
   if (comm_world.rank() == 0)
     comm_world.ssend(data, 1);
   if (comm_world.rank() == 1) {
-    T data_r;
-    comm_world.recv(data_r, 0);
-    return data_r == data;
+    if constexpr (is_span_v<T>) {
+      using element_type = typename T::element_type;
+      constexpr auto size = span_size<T>::value;
+      std::array<element_type, size> array;
+      std::span data_r(array);
+      comm_world.recv(data_r, 0);
+      return std::equal(data.begin(), data.end(), data_r.begin(), data_r.end());
+    } else {
+      T data_r;
+      comm_world.recv(data_r, 0);
+      return data_r == data;
+    }
   }
   return true;
 }
@@ -177,11 +227,22 @@ bool rsend_recv_test(const T &data) {
       // T is some fundamental type
       // mpl::communicator::irecv does not suffice in the cases above as the irecv performs a
       // probe first to receive STL containers
-      T data_r;
-      mpl::irequest r{comm_world.irecv(data_r, 0)};
-      comm_world.barrier();
-      r.wait();
-      return data_r == data;
+      if constexpr (is_span_v<T>) {
+        using element_type = typename T::element_type;
+        constexpr auto size = span_size<T>::value;
+        std::array<element_type, size> array;
+        std::span data_r(array);
+        mpl::irequest r{comm_world.irecv(data_r, 0)};
+        comm_world.barrier();
+        r.wait();
+        return std::equal(data.begin(), data.end(), data_r.begin(), data_r.end());
+      } else {
+        T data_r;
+        mpl::irequest r{comm_world.irecv(data_r, 0)};
+        comm_world.barrier();
+        r.wait();
+        return data_r == data;
+      }
     }
   } else
     comm_world.barrier();
@@ -264,6 +325,13 @@ BOOST_AUTO_TEST_CASE(send_recv) {
   BOOST_TEST(send_recv_test(std::pair<int, double>{1, 2.3}));
   BOOST_TEST(send_recv_test(std::tuple<int, double, bool>{1, 2.3, true}));
   BOOST_TEST(send_recv_test(std::array<int, 5>{1, 2, 3, 4, 5}));
+#if __cplusplus >= 202002L
+  {
+    int array[]{1, 2, 3, 4, 5};
+    std::span span{array};
+    BOOST_TEST(send_recv_test(span));
+  }
+#endif
   // strings and STL containers
   BOOST_TEST(send_recv_test(std::string{"Hello World"}));
   BOOST_TEST(send_recv_test(std::wstring{L"Hello World"}));
@@ -312,6 +380,13 @@ BOOST_AUTO_TEST_CASE(bsend_recv) {
   BOOST_TEST(bsend_recv_test(std::pair<int, double>{1, 2.3}));
   BOOST_TEST(bsend_recv_test(std::tuple<int, double, bool>{1, 2.3, true}));
   BOOST_TEST(bsend_recv_test(std::array<int, 5>{1, 2, 3, 4, 5}));
+#if __cplusplus >= 202002L
+  {
+    int array[]{1, 2, 3, 4, 5};
+    std::span span{array};
+    BOOST_TEST(bsend_recv_test(span));
+  }
+#endif
   // strings and STL containers
   BOOST_TEST(bsend_recv_test(std::string{"Hello World"}));
   BOOST_TEST(bsend_recv_test(std::wstring{L"Hello World"}));
@@ -360,6 +435,13 @@ BOOST_AUTO_TEST_CASE(ssend_recv) {
   BOOST_TEST(ssend_recv_test(std::pair<int, double>{1, 2.3}));
   BOOST_TEST(ssend_recv_test(std::tuple<int, double, bool>{1, 2.3, true}));
   BOOST_TEST(ssend_recv_test(std::array<int, 5>{1, 2, 3, 4, 5}));
+#if __cplusplus >= 202002L
+  {
+    int array[]{1, 2, 3, 4, 5};
+    std::span span{array};
+    BOOST_TEST(ssend_recv_test(span));
+  }
+#endif
   // strings and STL containers
   BOOST_TEST(ssend_recv_test(std::string{"Hello World"}));
   BOOST_TEST(ssend_recv_test(std::wstring{L"Hello World"}));
@@ -408,6 +490,13 @@ BOOST_AUTO_TEST_CASE(rsend_recv) {
   BOOST_TEST(rsend_recv_test(std::pair<int, double>{1, 2.3}));
   BOOST_TEST(rsend_recv_test(std::tuple<int, double, bool>{1, 2.3, true}));
   BOOST_TEST(rsend_recv_test(std::array<int, 5>{1, 2, 3, 4, 5}));
+#if __cplusplus >= 202002L
+  {
+    int array[]{1, 2, 3, 4, 5};
+    std::span span{array};
+    BOOST_TEST(rsend_recv_test(span));
+  }
+#endif
   // strings and STL containers
   BOOST_TEST(rsend_recv_test(std::string{"Hello World"}));
   BOOST_TEST(rsend_recv_test(std::wstring{L"Hello World"}));
